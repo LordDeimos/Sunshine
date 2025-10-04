@@ -30,10 +30,12 @@ INSTANTIATE_TEST_SUITE_P(
   Configurations,
   AudioTest,
   testing::Values(
-    std::make_tuple("HIGH_STEREO", config_t {5, 2, 0x3, {0}, config_flags(config_t::HIGH_QUALITY)}),
-    std::make_tuple("SURROUND51", config_t {5, 6, 0x3F, {0}, config_flags()}),
-    std::make_tuple("SURROUND71", config_t {5, 8, 0x63F, {0}, config_flags()}),
-    std::make_tuple("SURROUND51_CUSTOM", config_t {5, 6, 0x3F, {6, 4, 2, {0, 1, 4, 5, 2, 3}}, config_flags(config_t::CUSTOM_SURROUND_PARAMS)})
+    std::make_tuple("HIGH_STEREO", config_t {5, 2, 0x3, OPUS, {0}, config_flags(config_t::HIGH_QUALITY)}),
+    std::make_tuple("HIGH_STEREO_AC3", config_t {32, 2, 0x3, AC3, {0}, config_flags(config_t::HIGH_QUALITY)}),
+    std::make_tuple("SURROUND51", config_t {5, 6, 0x3F, OPUS, {0}, config_flags()}),
+    std::make_tuple("SURROUND51_AC3", config_t {32, 6, 0x3F, AC3, {0}, config_flags()}),
+    std::make_tuple("SURROUND71", config_t {5, 8, 0x63F, OPUS, {0}, config_flags()}),
+    std::make_tuple("SURROUND51_CUSTOM", config_t {5, 6, 0x3F, OPUS, {6, 4, 2, {0, 1, 4, 5, 2, 3}}, config_flags(config_t::CUSTOM_SURROUND_PARAMS)})
   ),
   [](const auto &info) {
     return std::string(std::get<0>(info.param));
@@ -43,7 +45,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(AudioTest, TestEncode) {
   std::thread timer([&] {
     // Terminate the audio capture after 100 ms
-    std::this_thread::sleep_for(100ms);
+    std::this_thread::sleep_for(160ms);
     const auto shutdown_event = m_mail->event<bool>(mail::shutdown);
     const auto audio_packets = m_mail->queue<packet_t>(mail::audio_packets);
     shutdown_event->raise(true);

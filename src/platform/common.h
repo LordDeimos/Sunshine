@@ -224,6 +224,27 @@ namespace platf {
       SIDE_LEFT,
       SIDE_RIGHT,
     };
+
+    inline const char *speakerName(uint8_t index) {
+      switch (index) {
+        case FRONT_LEFT:
+          return "FL";
+        case FRONT_RIGHT:
+          return "FR";
+        case FRONT_CENTER:
+          return "FC";
+        case LOW_FREQUENCY:
+          return "LFE";
+        case BACK_LEFT:
+          return "RL";
+        case BACK_RIGHT:
+          return "RR";
+        case SIDE_LEFT:
+          return "SL";
+        case SIDE_RIGHT:
+          return "SR";
+      }
+    }
   }  // namespace speaker
 
   enum class mem_type_e {

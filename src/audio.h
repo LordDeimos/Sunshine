@@ -10,8 +10,26 @@
 #include "utility.h"
 
 #include <bitset>
+#include <build-deps/build/_CPack_Packages/Linux/TGZ/build-deps-0.0.0-Linux/include/libavutil/audio_fifo.h>
+
+struct AVPacket;
+struct SwrContext;
 
 namespace audio {
+  void free_ctx(AVCodecContext *ctx);
+  void free_frame(AVFrame *frame);
+  void free_packet(AVPacket *packet);
+  void free_fifo(AVAudioFifo *fifo);
+  void free_swr_ctx(SwrContext *ctx);
+  void free_swr_buffer(uint8_t **buffer);
+
+  using avcodec_ctx_t = util::safe_ptr<AVCodecContext, free_ctx>;
+  using avcodec_frame_t = util::safe_ptr<AVFrame, free_frame>;
+  using avcodec_packet_t = util::safe_ptr<AVPacket, free_packet>;
+  using avcodec_audio_fifo_t = util::safe_ptr<AVAudioFifo, free_fifo>;
+  using swr_ctx_t = util::safe_ptr<SwrContext, free_swr_ctx>;
+  using swr_buffer_t = util::safe_ptr<uint8_t *, free_swr_buffer>;
+
   enum stream_config_e : int {
     STEREO,  ///< Stereo
     HIGH_STEREO,  ///< High stereo
@@ -22,7 +40,12 @@ namespace audio {
     MAX_STREAM_CONFIG  ///< Maximum audio stream configuration
   };
 
-  struct opus_stream_config_t {
+  enum stream_encoding_e : int {
+    OPUS,  ///< OPUS Decoder
+    AC3  ///< AC3 Passthrough
+  };
+
+  struct stream_config_t {
     std::int32_t sampleRate;
     int channelCount;
     int streams;
@@ -38,7 +61,7 @@ namespace audio {
     std::uint8_t mapping[8];
   };
 
-  extern opus_stream_config_t stream_configs[MAX_STREAM_CONFIG];
+  extern stream_config_t stream_configs[MAX_STREAM_CONFIG];
 
   struct config_t {
     enum flags_e : int {
@@ -51,6 +74,8 @@ namespace audio {
     int packetDuration;
     int channels;
     int mask;
+
+    int encoding = AC3;
 
     stream_params_t customStreamParams;
 

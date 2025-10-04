@@ -52,6 +52,7 @@ if(NOT DEFINED FFMPEG_PREPARED_BINARIES)
     set(FFMPEG_LIBRARIES
             "${FFMPEG_PREPARED_BINARIES}/lib/libavcodec.a"
             "${FFMPEG_PREPARED_BINARIES}/lib/libswscale.a"
+            "${FFMPEG_PREPARED_BINARIES}/lib/libswresample.a"
             "${FFMPEG_PREPARED_BINARIES}/lib/libavutil.a"
             "${FFMPEG_PREPARED_BINARIES}/lib/libcbs.a"
             "${FFMPEG_PREPARED_BINARIES}/lib/libSvtAv1Enc.a"
@@ -63,6 +64,7 @@ else()
     set(FFMPEG_LIBRARIES
         "${FFMPEG_PREPARED_BINARIES}/lib/libavcodec.a"
         "${FFMPEG_PREPARED_BINARIES}/lib/libswscale.a"
+		"${FFMPEG_PREPARED_BINARIES}/lib/libswresample.a"
         "${FFMPEG_PREPARED_BINARIES}/lib/libavutil.a"
         "${FFMPEG_PREPARED_BINARIES}/lib/libcbs.a"
         ${FFMPEG_PLATFORM_LIBRARIES})

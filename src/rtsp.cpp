@@ -942,6 +942,7 @@ namespace rtsp_stream {
     args.try_emplace("x-nv-vqos[0].bitStreamFormat"sv, "0"sv);
     args.try_emplace("x-nv-video[0].dynamicRangeMode"sv, "0"sv);
     args.try_emplace("x-nv-aqos.packetDuration"sv, "5"sv);
+    args.try_emplace("x-nv-audio.passthrough"sv, "0"sv);
     args.try_emplace("x-nv-general.useReliableUdp"sv, "1"sv);
     args.try_emplace("x-nv-vqos[0].fec.minRequiredFecPackets"sv, "0"sv);
     args.try_emplace("x-nv-general.featureFlags"sv, "135"sv);
@@ -961,6 +962,7 @@ namespace rtsp_stream {
       config.audio.channels = util::from_view(args.at("x-nv-audio.surround.numChannels"sv));
       config.audio.mask = util::from_view(args.at("x-nv-audio.surround.channelMask"sv));
       config.audio.packetDuration = util::from_view(args.at("x-nv-aqos.packetDuration"sv));
+      config.audio.encoding = util::from_view(args.at("x-nv-audio.passthrough"sv));
 
       config.audio.flags[audio::config_t::HIGH_QUALITY] =
         util::from_view(args.at("x-nv-audio.surround.AudioQuality"sv));
