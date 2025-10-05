@@ -3,7 +3,6 @@
  * @brief Definitions for audio capture and encoding.
  */
 // standard includes
-#include <libavutil/log.h>
 #include <thread>
 
 // lib includes
@@ -14,11 +13,10 @@
 #endif
 
 extern "C" {
-#include <libavcodec/avcodec.h>
 #include <libavcodec/codec_id.h>
-#include <libavutil/audio_fifo.h>
+#include <libavutil/log.h>
 #include <libavutil/opt.h>
-#include <libswresample/swresample.h>
+#include <libavutil/samplefmt.h>
 }
 
 // local includes
@@ -101,6 +99,7 @@ namespace audio {
   }
 
   void free_frame(AVFrame *frame) {
+    BOOST_LOG(info) << "Value of frame nb_side_data is: "sv << frame->nb_side_data;
     av_frame_free(&frame);
   }
 
@@ -197,9 +196,10 @@ namespace audio {
     return true;
   }
 
-  int doAC3Encode(avcodec_ctx_t &enc_ctx, avcodec_audio_fifo_t &queue, unsigned char *data, int frame_size = 1536) {
-    avcodec_frame_t decodedFrame {av_frame_alloc()};
-    if (!decodedFrame.get()) {
+  int doAC3Encode(AVCodecContext *enc_ctx, AVAudioFifo *queue, unsigned char *data, int frame_size = 1536) {
+    // TODO: use avcodec_frame_t
+    AVFrame *decodedFrame = av_frame_alloc();
+    if (!decodedFrame) {
       BOOST_LOG(error) << "Failed to allocate frame"sv;
       return -1;
     }
@@ -207,29 +207,30 @@ namespace audio {
     av_channel_layout_copy(&decodedFrame->ch_layout, &enc_ctx->ch_layout);
     decodedFrame->format = enc_ctx->sample_fmt;
     decodedFrame->sample_rate = enc_ctx->sample_rate;
+    decodedFrame->nb_side_data = 0;
     int ret = 0;
 
-    if ((ret = av_frame_get_buffer(decodedFrame.get(), 0)) < 0) {
+    if ((ret = av_frame_get_buffer(decodedFrame, 0)) < 0) {
       BOOST_LOG(error) << "Failed to allocate frame buffers: "sv << av_err2str(ret);
       return -1;
     }
 
-    avcodec_packet_t outPacket {av_packet_alloc()};
-    if (!outPacket.get()) {
+    AVPacket *outPacket = av_packet_alloc();
+    if (!outPacket) {
       BOOST_LOG(error) << "Could not allocate packet"sv;
       return -1;
     }
 
-    if (av_audio_fifo_read(queue.get(), (void **) decodedFrame->data, frame_size) < frame_size) {
+    if (av_audio_fifo_read(queue, (void **) decodedFrame->data, frame_size) < frame_size) {
       BOOST_LOG(error) << "Failed to retreive frame from FIFO"sv;
       return -1;
     }
 
     uint8_t buffer[frame_size];
     int bytes = 0;
-    ret = avcodec_send_frame(enc_ctx.get(), decodedFrame.get());
+    ret = avcodec_send_frame(enc_ctx, decodedFrame);
     while (ret >= 0) {
-      ret = avcodec_receive_packet(enc_ctx.get(), outPacket.get());
+      ret = avcodec_receive_packet(enc_ctx, outPacket);
       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
         break;
       } else if (ret < 0) {
@@ -238,70 +239,90 @@ namespace audio {
       }
 
       // write data to packet
-      memcpy(buffer + bytes, &outPacket->data[0], outPacket->size);
-      bytes += outPacket->size;
+      // avcodec_receive_packet can sometimes get 2560 bytes so truncate to correct frame size to avoid issues
+      memcpy(buffer + bytes, &outPacket->data[0], std::min(outPacket->size, frame_size));
+      bytes += std::min(outPacket->size, frame_size);
     }
     memcpy(data, buffer, bytes);
+    av_packet_free(&outPacket);
+    av_frame_free(&decodedFrame);
     return bytes;
   }
 
-  int enqueueSamples(avcodec_audio_fifo_t &queue, uint8_t **samples, const int frame_size = 1536) {
+  int enqueueSamples(AVAudioFifo *queue, uint8_t **samples, const int frame_size = 1536) {
     int returnCode;
-    if ((returnCode = av_audio_fifo_realloc(queue.get(), av_audio_fifo_size(queue.get()) + frame_size)) < 0) {
+    if ((returnCode = av_audio_fifo_realloc(queue, av_audio_fifo_size(queue) + frame_size)) < 0) {
       BOOST_LOG(error) << "Failed to reallocate FIFO: "sv << av_err2str(returnCode);
       return returnCode;
     }
-    if (av_audio_fifo_write(queue.get(), (void **) samples, frame_size) < frame_size) {
+    if (av_audio_fifo_write(queue, (void **) samples, frame_size) < frame_size) {
       BOOST_LOG(error) << "Failed to write to FIFO: "sv;
       return -1;
     }
     return 0;
   }
 
-  void ac3Encode(sample_queue_t samples, stream_config_t stream, config_t config, auto &packets, void *channel_data) {
-    avcodec_ctx_t encodeContext;
-    swr_ctx_t resampler {swr_alloc()};
-    const AVCodec *outCodec;
-    auto outputFormat = AV_SAMPLE_FMT_FLTP;
+  SwrContext *initResampler(int channels, int sampleRate, AVSampleFormat inputFormat, AVSampleFormat outputFormat) {
+    auto resampler = swr_alloc();
 
     AVChannelLayout channelLayout;
-    if (config.channels == 2) {
+    if (channels == 2) {
       channelLayout = AV_CHANNEL_LAYOUT_STEREO;
-    } else if (config.channels == 6) {
+    } else if (channels == 6) {
       channelLayout = AV_CHANNEL_LAYOUT_5POINT1;
-    } else if (config.channels == 8) {
+    } else if (channels == 8) {
       channelLayout = AV_CHANNEL_LAYOUT_7POINT1;
     }
-    av_opt_set_chlayout(resampler.get(), "in_chlayout", &channelLayout, 0);
-    av_opt_set_int(resampler.get(), "in_sample_rate", stream.sampleRate, 0);
-    av_opt_set_sample_fmt(resampler.get(), "in_sample_fmt", AV_SAMPLE_FMT_FLT, 0), 0;
+    av_opt_set_chlayout(resampler, "in_chlayout", &channelLayout, 0);
+    av_opt_set_int(resampler, "in_sample_rate", sampleRate, 0);
+    av_opt_set_sample_fmt(resampler, "in_sample_fmt", inputFormat, 0), 0;
 
-    av_opt_set_chlayout(resampler.get(), "out_chlayout", &channelLayout, 0);
-    av_opt_set_int(resampler.get(), "out_sample_rate", stream.sampleRate, 0);
-    av_opt_set_sample_fmt(resampler.get(), "out_sample_fmt", outputFormat, 0);
+    av_opt_set_chlayout(resampler, "out_chlayout", &channelLayout, 0);
+    av_opt_set_int(resampler, "out_sample_rate", sampleRate, 0);
+    av_opt_set_sample_fmt(resampler, "out_sample_fmt", outputFormat, 0);
 
     int returnCode = 0;
-    if ((returnCode = swr_init(resampler.get())) < 0) {
+    if ((returnCode = swr_init(resampler)) < 0) {
       BOOST_LOG(error) << "Failed to init resampler";
-      return;
-    }
-    swr_buffer_t src_data, dst_data;
-    int dst_linesize;
-    int src_nb_samples = 1536, dst_nb_samples, max_dst_nb_samples;
-    max_dst_nb_samples = dst_nb_samples =
-      av_rescale_rnd(src_nb_samples, stream.sampleRate, stream.sampleRate, AV_ROUND_UP);
-    if ((returnCode = av_samples_alloc_array_and_samples(&dst_data, &dst_linesize, config.channels, dst_nb_samples, outputFormat, 0)) < 0) {
-      BOOST_LOG(error) << "Failed to allocate resampler output buffers: "sv << av_err2str(returnCode);
-      return;
+      return nullptr;
     }
 
-    avcodec_audio_fifo_t queue {av_audio_fifo_alloc(outputFormat, config.channels, 1)};
-    if (!queue.get()) {
+    return resampler;
+  }
+
+  int allocateResampleBuffers(int channels, int nSamples, int sampleRate, AVSampleFormat outputFormat, swr_buffer_t &dst_data) {
+    int dst_linesize;
+    int returnCode = 0;
+    int src_nb_samples = nSamples, dst_nb_samples;
+    dst_nb_samples =
+      av_rescale_rnd(src_nb_samples, sampleRate, sampleRate, AV_ROUND_UP);
+    if ((returnCode = av_samples_alloc_array_and_samples(&dst_data, &dst_linesize, channels, dst_nb_samples, outputFormat, 0)) < 0) {
+      BOOST_LOG(error) << "Failed to allocate resampler output buffers: "sv << av_err2str(returnCode);
+      return -1;
+    }
+    return dst_nb_samples;
+  }
+
+  void ac3Encode(sample_queue_t samples, stream_config_t stream, config_t config, auto &packets, void *channel_data) {
+    avcodec_ctx_t encodeContext;
+    const AVCodec *outCodec;
+    // TODO: use avcodec_audio_fifo_t
+    AVAudioFifo *queue;
+    int returnCode = 0;
+    const auto frame_size = 1536;
+    auto outputFormat = AV_SAMPLE_FMT_FLTP;
+
+    swr_ctx_t resampler {initResampler(config.channels, stream.sampleRate, AV_SAMPLE_FMT_FLT, outputFormat)};
+
+    swr_buffer_t dst_data;
+    int max_dst_nb_samples, dst_nb_samples, src_nb_samples = frame_size;
+    max_dst_nb_samples = dst_nb_samples = allocateResampleBuffers(config.channels, frame_size, stream.sampleRate, outputFormat, dst_data);
+
+    queue = av_audio_fifo_alloc(outputFormat, config.channels, frame_size);
+    if (!queue) {
       BOOST_LOG(error) << "Failed to allocate fifo queue"sv;
       return;
     }
-
-    auto frame_size = 1536;
 
     if (!initEncoder(encodeContext, outCodec, stream.bitrate, stream.sampleRate, frame_size, stream.channelCount, config.flags[config_t::CUSTOM_SURROUND_PARAMS], stream.mapping)) {
       BOOST_LOG(error) << "Shutting down AC3 encoder";
@@ -336,17 +357,17 @@ namespace audio {
         return;
       }
 
-      int bytes = doAC3Encode(encodeContext, queue, std::begin(packet));
+      int bytes = doAC3Encode(encodeContext.get(), queue, std::begin(packet));
       if (bytes < 0) {
         BOOST_LOG(error) << "Couldn't encode audio"sv;
         packets->stop();
-
         return;
       }
 
       packet.fake_resize(bytes);
       packets->raise(channel_data, std::move(packet));
     }
+    av_audio_fifo_free(queue);
   }
 
   void encodeThread(sample_queue_t samples, config_t config, void *channel_data) {

@@ -10,10 +10,12 @@
 #include "utility.h"
 
 #include <bitset>
-#include <build-deps/build/_CPack_Packages/Linux/TGZ/build-deps-0.0.0-Linux/include/libavutil/audio_fifo.h>
 
-struct AVPacket;
-struct SwrContext;
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/audio_fifo.h>
+#include <libswresample/swresample.h>
+}
 
 namespace audio {
   void free_ctx(AVCodecContext *ctx);
